@@ -718,7 +718,7 @@ public class ZEDPlaneDetectionEditor : Editor
 		EditorGUILayout.EndHorizontal();
 
 		EditorGUILayout.BeginHorizontal();
-        planePositionDelayMax.intValue = EditorGUILayout.IntField("Automatic Plane Placement Delay:", planePositionDelayMax.intValue);
+        planePositionDelayMax.intValue = Mathf.Clamp(EditorGUILayout.IntField("Automatic Plane Placement Delay:", planePositionDelayMax.intValue),0,5000);
 		GUILayout.FlexibleSpace();
 		EditorGUILayout.EndHorizontal();
 		EditorGUILayout.BeginHorizontal();
