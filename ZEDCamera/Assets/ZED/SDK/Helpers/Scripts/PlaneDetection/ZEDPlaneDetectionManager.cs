@@ -186,6 +186,20 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     private Vector4 currentPlaneCameraSpace;
 
     /// <summary>
+    /// Stores world space position the camera was in when plane was detected. 
+    /// This is so that when the plane is finally rendered, it still has the same position from which it was first detected.
+    /// Primarily for automatic plane detection.
+    /// </summary>
+    private Vector3 camPosition;
+
+    /// <summary>
+    /// Stores world space rotation the camera was in when plane was detected. 
+    /// This is so that when the plane is finally rendered, it still has the same rotation from which it was first detected.
+    /// Primarily for automatic plane detection.
+    /// </summary>
+    private Quaternion camRotation;
+
+    /// <summary>
     /// Used to track how long the camera is focusing on an area.
     /// Not using units of time, so not incredibly accurate.
     /// Automatic plane tracking only.
@@ -397,8 +411,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 		return false;
 	}
 
-    private Vector3 camPosition;
-    private Quaternion camRotation;
     private bool setNewPlane(Vector2 screenPos)
     {
         currentPlane = new ZEDPlaneGameObject.PlaneData();
@@ -499,7 +511,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 		}
 		return false;
 	}
-
 
     /// <summary>
     /// Check if the screen was clicked. If so, check for a plane where the click happened using DetectPlaneAtHit().
