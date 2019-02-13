@@ -40,6 +40,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// Reference to the current instance of ZEDCamera, which links the Unity plugin with the ZED SDK.
     /// </summary>
 	private sl.ZEDCamera zedCam;
+
     /// <summary>
     /// Whether OnReady() has been called and finished. (OnReady() is called when the ZED finishes initializing) 
     /// </summary>
@@ -50,6 +51,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// This won't happen unless DetectFloorPlane() is called. 
     /// </summary>
 	private bool hasDetectedFloor = false;
+
     /// <summary>
     /// Public accessor for hasDetectedFloor, which is whether a floor plane has been detected during runtime. 
     /// </summary>
@@ -411,6 +413,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 		return false;
 	}
 
+    /// <summary>
+    /// Detects a plane at the given point in screen space. If it finds a plane, save the camera space position, and the world space coordinates.
+    /// </summary>
+    /// <returns><c>true</c>, if plane was detected, <c>false</c> otherwise.</returns>
     private bool setNewPlane(Vector2 screenPos)
     {
         currentPlane = new ZEDPlaneGameObject.PlaneData();
@@ -425,17 +431,25 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         }
         return false;
     }
-
+    /// <summary>
+    /// Fire a raycast from the current position of the camera in worldspace to the given worldPosition parameter.
+    /// If the ray hits something, isBlocked = true. In order to hit something, collision must be enabled on the object.
+    /// Using the IsLocationVisible helper method was often innacurate due to incorrect depth values, so doing simple raycasting instead.
+    /// </summary>
+    /// <returns><c>true</c>, if ray hits something, <c>false</c> otherwise.</returns>
     private bool isPlaneBlocked(Vector3 worldPosition)
     {
         RaycastHit hit;
-        // Using the IsLocationVisible method was often innacurate due to incorrect depth values, so doing simple raycasting instead.
         bool isBlocked = Physics.Raycast(LeftCamera.transform.position, worldPosition - LeftCamera.transform.position, out hit);
         Debug.Log("COORD @ " + worldPosition + " Blocked: " + isBlocked);
         return isBlocked;
     }
 
-
+    /// <summary>
+    /// Used in the automatic modes of plane detection. Keeps tracking a plane until the planePositionDelay hits planePositionDelayMax.
+    /// Ensures the camera hasn't moved too much from the area where the candidate plane should be at. If the cam moves too much, look for a new plane.
+    /// </summary>
+    /// <returns><c>true</c>, if cam hasnt moved too much and its safe to place plane, <c>false</c> otherwise.</returns>
     private bool DetectPlaneAtHitAuto(Vector2 screenPos)
     {
         if (!trackThisPlane)  // If plane has not been assigned, try to detect and assign it
@@ -467,6 +481,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// Detects the plane around screen-space coordinates specified. This is for the click-to-detect plane mode, not automatic.
+    /// </summary>
+    /// <returns><c>true</c>, if plane was placed, <c>false</c> otherwise.</returns>
     public bool DetectPlaneAtHit(Vector2 screenPos)
     {
         bool result = false;
@@ -476,11 +494,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Detects the plane around screen-space coordinates specified. 
+    /// Places the plane detected earlier at its position in world space, creates the game object and adds it to the holder.transform children. 
     /// </summary>
-    /// <returns><c>true</c>, if plane at hit was detected, <c>false</c> otherwise.</returns>
-    /// <param name="screenPos">Position of the pixel in screen space (2D).</param>
-    public bool PlaceHitPlane()
+    /// <returns><c>true</c>, if plane was placed, <c>false</c> otherwise.</returns>
+    private bool PlaceHitPlane()
 	{
 		if (!IsReady)
 			return false; //Do nothing if the ZED isn't finished initializing. 
@@ -513,7 +530,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 	}
 
     /// <summary>
-    /// Check if the screen was clicked. If so, check for a plane where the click happened using DetectPlaneAtHit().
+    /// Depending on the mode, either checks for clicks on screen or automatically tries to place a plane.
     /// </summary>
     void Update()
 	{
@@ -572,7 +589,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 }
 
 
-
 #if UNITY_EDITOR
 /// <summary>
 /// Custom Inspector editor for ZEDPlaneDetectionManager. 
@@ -609,12 +625,32 @@ public class ZEDPlaneDetectionEditor : Editor
     /// Serializable version of ZEDPlaneDetectionManager's planeDetectionMode property. 
     /// </summary>
     private SerializedProperty planeDetectionMode;
+    /// <summary>
+    /// Serializable version of ZEDPlaneDetectionManager's pauseDetection property. 
+    /// </summary>
     private SerializedProperty pauseDetection;
+    /// <summary>
+    /// Serializable version of ZEDPlaneDetectionManager's planePositionDelayMax property. 
+    /// </summary>
+    private SerializedProperty planePositionDelayMax;
 
+    /// <summary>
+    /// Index of option chosen in popup/dropdown menu. First option = 0.
+    /// </summary>
     private int popupIndex;
+    /// <summary>
+    /// Strings for different popup options.
+    /// </summary>
     private string[] popupOptions = new string[]{"Click Screen to Detect", "Automatic Simple", "Automatic Collision Detection"};
+    /// <summary>
+    /// Index of string for pause/resume button. 0 = "Pause Detection", 1 = "Resume Detection"
+    /// </summary>
     private int pausePlayIndex;
+    /// <summary>
+    /// Actual strings for pause/resume button.
+    /// </summary>
     private string[] pausePlayButton = new string[]{"Pause Detection", "Resume Detection"};
+
     private ZEDPlaneDetectionManager Target
     {
         get { return (ZEDPlaneDetectionManager)target; }
@@ -630,6 +666,7 @@ public class ZEDPlaneDetectionEditor : Editor
         overrideMaterialOption = serializedObject.FindProperty("overrideMaterial");
         planeDetectionMode = serializedObject.FindProperty("planeDetectionMode");
         pauseDetection = serializedObject.FindProperty("pauseDetection");
+        planePositionDelayMax = serializedObject.FindProperty("planePositionDelayMax");
         popupIndex = planeDetectionMode.intValue;
         pausePlayIndex = pauseDetection.boolValue ? 1:0; // 1 if true, 0 if paused
     }
@@ -680,6 +717,12 @@ public class ZEDPlaneDetectionEditor : Editor
 		GUILayout.Space(20);
 		EditorGUILayout.EndHorizontal();
 
+		EditorGUILayout.BeginHorizontal();
+        planePositionDelayMax.intValue = EditorGUILayout.IntField("Automatic Plane Placement Delay:", planePositionDelayMax.intValue);
+		GUILayout.FlexibleSpace();
+		EditorGUILayout.EndHorizontal();
+		EditorGUILayout.BeginHorizontal();
+
         GUI.enabled = cameraIsReady;
         GUIContent deletePlanesButtonLabel = new GUIContent("Clear Planes", "Delete all detected planes.");
         if (GUILayout.Button(deletePlanesButtonLabel))
@@ -687,7 +730,6 @@ public class ZEDPlaneDetectionEditor : Editor
 			if (planeDetector.IsReady)
 				planeDetector.destroyAllPlanes();
 		}
-
         GUIContent pauseButton = new GUIContent(pausePlayButton[pausePlayIndex], "Pause/Resume plane detection.");
         if (GUILayout.Button(pauseButton))
 		{
@@ -700,6 +742,8 @@ public class ZEDPlaneDetectionEditor : Editor
             }
             
 		}
+		EditorGUILayout.EndHorizontal();
+
         GUI.enabled = true;
 		GUILayout.Space(20);
 		EditorGUILayout.BeginHorizontal();
@@ -715,7 +759,6 @@ public class ZEDPlaneDetectionEditor : Editor
         GUIContent overridematlabel = new GUIContent("Override Material: ", "Material applied to all planes if visible. If left empty, default materials will be applied depending on the plane type.");
         planeDetector.overrideMaterial = (Material)EditorGUILayout.ObjectField(overridematlabel, planeDetector.overrideMaterial, typeof(Material), false);
 
-
         planeDetector.SwitchDisplay();
 		GUILayout.Space(20);
 		GUI.enabled = colliderButtonEnabled;
@@ -725,8 +768,6 @@ public class ZEDPlaneDetectionEditor : Editor
 		EditorGUILayout.EndHorizontal();
         GUIContent physicslabel = new GUIContent("Add Collider", "Whether the planes can be collided with using physics.");
 		addPhysicsOption.boolValue = EditorGUILayout.Toggle(physicslabel, addPhysicsOption.boolValue);
-
-
 
 		serializedObject.ApplyModifiedProperties(); //Applies all changes to serializedproperties to the actual properties they're connected to. 
 
