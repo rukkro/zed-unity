@@ -1,4 +1,4 @@
-﻿//======= Copyright (c) Stereolabs Corporation, All rights reserved. ===============
+//======= Copyright (c) Stereolabs Corporation, All rights reserved. ===============
 
 using UnityEngine;
 using System.Collections.Generic;
@@ -24,12 +24,12 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// <summary>
     /// GameObject all planes are parented to. Created at runtime, called '[ZED Planes]' in Hierarchy.
     /// </summary>
-    private GameObject holder; 
+    private GameObject holder;
 
     /// <summary>
     /// Reference to the scene's ZEDManager component. Usually in the ZED_Rig_Mono or ZED_Rig_Stereo GameObject. 
     /// </summary>
-	private ZEDManager manager = null;
+    private ZEDManager manager = null;
 
     /// <summary>
     /// Reference to the left camera in the ZED rig. 
@@ -54,8 +54,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// Public accessor for hasDetectedFloor, which is whether a floor plane has been detected during runtime. 
     /// </summary>
 	public bool HasDetectedFloor {
-		get { return hasDetectedFloor; }
-	}
+        get { return hasDetectedFloor; }
+    }
 
     /// <summary>
     /// GameObject holding floorPlane, which representing the floor plane, if one has been detected. 
@@ -136,6 +136,14 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     public Material overrideMaterial = null; //If null, shows wireframe. Otherwise, displays your custom material. 
 
     /// <summary>
+    /// Determines whether planes are detected on screen click, or automatically based on the point in the center of the screen.
+    /// Modes: 0 = "Click Screen to Detect", 1 = "Automatic Simple", 2 = "Automatic Collision Detection"
+    /// 0 - click on screen to try to detect plane. 1 - Automatically try to detect planes based on point in center of screen space
+    /// 2 - Auto detect planes based on center point of screen space AND try to avoid collision with other objects/planes w/ collision
+    /// </summary>
+    public int planeDetectionMode = 0;
+
+    /// <summary>
     /// References to the ZEDPlaneRenderer components that draw the planes for each camera. 
     /// [0] is for the left eye, [1] is for the right (if applicable). 
     /// </summary>
@@ -151,11 +159,32 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     public float GetEstimatedPlayerHeight {
 		get { return estimatedPlayerHeight; }
 	}
-	
-	/// <summary>
-	/// Assign references, create the holder gameobject, and other misc. initialization. 
-	/// </summary>
-	private void Start()
+    /// <summary>
+    /// Stores current plane used in automatic tracking modes. 
+    /// </summary>
+    private ZEDPlaneGameObject.PlaneData currentPlane;
+    /// <summary>
+    /// Stores approx coordinates of the plane in camera space from zedCam.GetXYZValue()
+    /// Used to compare the realtime camera space coords to those of the detected plane
+    /// Works better than comparing cam space coords to planeCenter
+    /// </summary>
+    private Vector4 currentPlaneCameraSpace;
+    /// <summary>
+    /// Used to track how long the camera is focusing on an area.
+    /// Not using units of time, so not incredibly accurate.
+    /// Automatic plane tracking only.
+    /// </summary>
+    private int camPositionTracker = 0;
+    /// <summary>
+    /// Determines if the detected plane should be stored and its camera space position tracked until its rendered or overwritten.
+    /// Automatic plane tracking only.
+    /// </summary>
+    private bool trackThisPlane = false;
+
+    /// <summary>
+    /// Assign references, create the holder gameobject, and other misc. initialization. 
+    /// </summary>
+    private void Start()
 	{
 		manager = GameObject.FindObjectOfType(typeof(ZEDManager)) as ZEDManager;
 
@@ -334,48 +363,103 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 	}
 
 
-	/// <summary>
-	/// Detects the plane around screen-space coordinates specified. 
-	/// </summary>
-	/// <returns><c>true</c>, if plane at hit was detected, <c>false</c> otherwise.</returns>
-	/// <param name="screenPos">Position of the pixel in screen space (2D).</param>
-	public bool DetectPlaneAtHit(Vector2 screenPos)
+    private bool setNewPlane(Vector2 screenPos)
+    {
+        currentPlane = new ZEDPlaneGameObject.PlaneData();
+        if (zedCam.findPlaneAtHit(ref currentPlane, screenPos) == sl.ERROR_CODE.SUCCESS)
+        {
+            // Storing this as the reference point of the plane in camera space. 
+            // Using the PlaneCenter to compare current camera space position to the plane's doesnt work well
+            zedCam.GetXYZValue(screenPos, out currentPlaneCameraSpace);
+            return true;
+        }
+        return false;
+    }
+
+    private bool isPlaneBlocked(Vector3 worldPosition)
+    {
+        RaycastHit hit;
+        // Using the IsLocationVisible method was often innacurate due to incorrect depth values, so doing simple raycasting instead.
+        bool isBlocked = Physics.Raycast(LeftCamera.transform.position, worldPosition - LeftCamera.transform.position, out hit);
+        Debug.Log("COORD @ " + worldPosition + " Blocked: " + isBlocked);
+        return isBlocked;
+    }
+
+
+    private bool DetectPlaneAtHitAuto(Vector2 screenPos)
+    {
+        if (!trackThisPlane)  // If plane has not been assigned, try to detect and assign it
+        {
+            camPositionTracker = 0;
+            if (setNewPlane(screenPos)) // If it found a new plane, we want to track it
+                trackThisPlane = true;
+            return false;
+        }
+
+        Vector4 cameraSpaceCoordinates;
+        // Get camera space coords at center of screen space
+        zedCam.GetXYZValue(screenPos, out cameraSpaceCoordinates);
+        // If camera position and rotation have not moved much since first detecting a plane in camera space
+        if (Vector3.Distance(cameraSpaceCoordinates, currentPlaneCameraSpace) <= .4) {
+            camPositionTracker += 1;
+        }
+        else
+        { // If camera position coordinates in screen space has changed too much, stop tracking this plane
+            trackThisPlane = false;
+            return false;
+        }
+        if (camPositionTracker < 300)
+        { // If camera hasn't been aiming at same area long enough, don't want to place plane yet
+            return false;
+        } 
+        // Cam has been aiming long enough at candidate plane area, return true indicating we can place it (or do other placement checks)
+        trackThisPlane = false;
+        return true;
+    }
+
+    public bool DetectPlaneAtHit(Vector2 screenPos)
+    {
+        bool result = false;
+        if (setNewPlane(screenPos))
+            result = PlaceHitPlane();
+        return result;
+    }
+
+    /// <summary>
+    /// Detects the plane around screen-space coordinates specified. 
+    /// </summary>
+    /// <returns><c>true</c>, if plane at hit was detected, <c>false</c> otherwise.</returns>
+    /// <param name="screenPos">Position of the pixel in screen space (2D).</param>
+    public bool PlaceHitPlane()
 	{
 		if (!IsReady)
 			return false; //Do nothing if the ZED isn't finished initializing. 
+        int numVertices, numTriangles = 0; 
+		zedCam.convertHitPlaneToMesh(planeMeshVertices, planeMeshTriangles, out numVertices, out numTriangles);
+		if (numVertices > 0 && numTriangles > 0) {
+            GameObject newhitGO = new GameObject(); //Make a new GameObject to hold the new plane. 
+            newhitGO.transform.SetParent(holder.transform); 
+              
+			Vector3[] worldPlaneVertices = new Vector3[numVertices];
+			int[] worldPlaneTriangles = new int[numTriangles];
+			TransformCameraToLocalMesh (LeftCamera.transform, planeMeshVertices, planeMeshTriangles, worldPlaneVertices, worldPlaneTriangles, numVertices, numTriangles, currentPlane.PlaneCenter);
 
-        ZEDPlaneGameObject.PlaneData plane =  new ZEDPlaneGameObject.PlaneData();
-		if (zedCam.findPlaneAtHit(ref plane,screenPos) == sl.ERROR_CODE.SUCCESS) //We found a plane. 
-        {
-			int numVertices, numTriangles = 0;
-			zedCam.convertHitPlaneToMesh (planeMeshVertices, planeMeshTriangles, out numVertices, out numTriangles);
-			if (numVertices > 0 && numTriangles > 0) {
-                GameObject newhitGO = new GameObject(); //Make a new GameObject to hold the new plane. 
-                newhitGO.transform.SetParent(holder.transform);
+            //Move the GameObject to the center of the plane. Note that the plane data's center is relative to the camera. 
+            newhitGO.transform.position = LeftCamera.transform.position; //Add the camera's world position 
+            newhitGO.transform.position += LeftCamera.transform.rotation * currentPlane.PlaneCenter; //Add the center of the plane
+            Debug.Log("PLACED PLANE @ " + newhitGO.transform.position);
+			ZEDPlaneGameObject hitPlane = newhitGO.AddComponent<ZEDPlaneGameObject>();
 
-				Vector3[] worldPlaneVertices = new Vector3[numVertices];
-				int[] worldPlaneTriangles = new int[numTriangles];
-				TransformCameraToLocalMesh (LeftCamera.transform, planeMeshVertices, planeMeshTriangles, worldPlaneVertices, worldPlaneTriangles, numVertices, numTriangles, plane.PlaneCenter);
+            if(overrideMaterial != null) hitPlane.Create (currentPlane, worldPlaneVertices, worldPlaneTriangles, planeHitCount + 1, overrideMaterial);
+            else hitPlane.Create(currentPlane, worldPlaneVertices, worldPlaneTriangles, planeHitCount + 1);
 
-                //Move the GameObject to the center of the plane. Note that the plane data's center is relative to the camera. 
-                newhitGO.transform.position = LeftCamera.transform.position; //Add the camera's world position 
-                newhitGO.transform.position += LeftCamera.transform.rotation * plane.PlaneCenter; //Add the center of the plane
-
-				ZEDPlaneGameObject hitPlane = newhitGO.AddComponent<ZEDPlaneGameObject>();
-
-                if(overrideMaterial != null) hitPlane.Create (plane, worldPlaneVertices, worldPlaneTriangles, planeHitCount + 1, overrideMaterial);
-                else hitPlane.Create(plane, worldPlaneVertices, worldPlaneTriangles, planeHitCount + 1);
-
-                hitPlane.SetPhysics (addPhysicsOption);
-				hitPlane.SetVisible (isVisibleInSceneOption);
-				hitPlaneList.Add (hitPlane);
-				planeHitCount++;
-				return true;
-			}
-		} 
-
+            hitPlane.SetPhysics (addPhysicsOption);
+			hitPlane.SetVisible (isVisibleInSceneOption);
+			hitPlaneList.Add (hitPlane);
+			planeHitCount++;
+			return true;
+		}
 		return false;
-
 	}
 
 
@@ -384,11 +468,25 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// </summary>
     void Update()
 	{
-		if (Input.GetMouseButtonDown(0)) {
+        // 0 = "Click Screen to Detect"
+        if(planeDetectionMode == 0 && Input.GetMouseButtonDown(0)) {
 			Vector2 ScreenPosition = Input.mousePosition;
-			DetectPlaneAtHit (ScreenPosition);
-		}
-	}
+            DetectPlaneAtHit(ScreenPosition);
+        }
+        // 1 = "Automatic Simple"
+        else if (planeDetectionMode == 1)
+        {
+            if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+                PlaceHitPlane();
+        }
+        // 2 = "Automatic Collision Detection"
+        else if (planeDetectionMode == 2)
+        {
+            if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+                if(!isPlaneBlocked(LeftCamera.transform.position + (LeftCamera.transform.rotation * currentPlane.PlaneCenter)))
+                    PlaceHitPlane();
+        }
+    }
 
 	/// <summary>
 	/// Switches the IsDisplay setting, used to know if planes should be rendered. 
@@ -438,6 +536,7 @@ public class ZEDPlaneDetectionEditor : Editor
     private ZEDPlaneDetectionManager planeDetector;
 
     // private GUILayoutOption[] optionsButtonBrowse = { GUILayout.MaxWidth(30) };
+    private bool colliderButtonEnabled = true;
 
     /// <summary>
     /// Serializable version of ZEDPlaneDetectionManager's addPhysicsOption property. 
@@ -455,7 +554,13 @@ public class ZEDPlaneDetectionEditor : Editor
     /// Serializable version of ZEDPlaneDetectionManager's overrideMaterialOption property. 
     /// </summary>
     private SerializedProperty overrideMaterialOption;
+    /// <summary>
+    /// Serializable version of ZEDPlaneDetectionManager's planeDetectionMode property. 
+    /// </summary>
+    private SerializedProperty planeDetectionMode;
 
+    private int popupIndex;
+    private string[] popupOptions = new string[]{"Click Screen to Detect", "Automatic Simple", "Automatic Collision Detection"};
 
     private ZEDPlaneDetectionManager Target
     {
@@ -470,12 +575,14 @@ public class ZEDPlaneDetectionEditor : Editor
 		isVisibleInSceneOption = serializedObject.FindProperty("isVisibleInSceneOption");
 		isVisibleInGameOption = serializedObject.FindProperty("isVisibleInGameOption");
         overrideMaterialOption = serializedObject.FindProperty("overrideMaterial");
+        planeDetectionMode = serializedObject.FindProperty("planeDetectionMode");
+        popupIndex = planeDetectionMode.intValue;
     }
 
+ 
     public override void OnInspectorGUI()
     {
 		bool cameraIsReady = sl.ZEDCamera.GetInstance().IsCameraReady;
-
 
 		serializedObject.Update();
 
@@ -498,8 +605,25 @@ public class ZEDPlaneDetectionEditor : Editor
 		}
 		GUILayout.FlexibleSpace();
 		EditorGUILayout.EndHorizontal();
+		GUILayout.Space(5);
 
 		GUI.enabled = true;
+		EditorGUILayout.BeginHorizontal();
+        GUIContent planedetectionlabel = new GUIContent("Plane Detection Mode", "Change how planes are detected, whether automatic or on screen click.");
+        GUILayout.Label(planedetectionlabel);
+        popupIndex = EditorGUILayout.Popup(popupIndex, popupOptions);
+        planeDetectionMode.intValue = popupIndex;
+        if(planeDetectionMode.intValue == 2){
+            colliderButtonEnabled = false;
+            addPhysicsOption.boolValue = true;
+        }
+        else{
+            colliderButtonEnabled = true;
+        }
+		GUILayout.Space(20);
+		EditorGUILayout.EndHorizontal();
+
+
 		GUILayout.Space(20);
 		EditorGUILayout.BeginHorizontal();
 		GUILayout.Label("Visualization", EditorStyles.boldLabel);
@@ -517,14 +641,14 @@ public class ZEDPlaneDetectionEditor : Editor
 
         planeDetector.SwitchDisplay();
 		GUILayout.Space(20);
-		GUI.enabled = true;
+		GUI.enabled = colliderButtonEnabled;
 		EditorGUILayout.BeginHorizontal();
 		GUILayout.Label("Physics", EditorStyles.boldLabel);
 		GUILayout.FlexibleSpace();
 		EditorGUILayout.EndHorizontal();
-
         GUIContent physicslabel = new GUIContent("Add Collider", "Whether the planes can be collided with using physics.");
 		addPhysicsOption.boolValue = EditorGUILayout.Toggle(physicslabel, addPhysicsOption.boolValue);
+
 
 
 		serializedObject.ApplyModifiedProperties(); //Applies all changes to serializedproperties to the actual properties they're connected to. 
