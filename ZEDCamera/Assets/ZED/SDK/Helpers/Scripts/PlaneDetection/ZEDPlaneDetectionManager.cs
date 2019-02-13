@@ -92,17 +92,29 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// <param name="i">Index within hitPlaneList.</param>
     /// <returns></returns>
 	public ZEDPlaneGameObject getHitPlane(int i)
-	{
-		if (i < hitPlaneList.Count)
-			return hitPlaneList [i];
-		else
-			return null;
-	}
+    {
+        if (i < hitPlaneList.Count)
+            return hitPlaneList[i];
+        else
+            return null;
+    }
+
+    /// <summary>
+    /// Destroys all plane game objects
+    /// </summary>
+    public void destroyAllPlanes()
+    {
+        foreach (Transform child in holder.transform)
+        {
+            GameObject.Destroy(child.gameObject);
+        }
+    }
 
     /// <summary>
     /// Buffer for holding a new plane's vertex data from the SDK.
     /// </summary>
 	private Vector3[] planeMeshVertices; 
+
     /// <summary>
     /// Buffer for holding a new plane's triangle data from the SDK.
     /// </summary>
@@ -153,33 +165,56 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// How high the player's head is from the floor. Filled in when DetectFloorPlane() is called. 
     /// </summary>
     private float estimatedPlayerHeight = 0.0f;
+
     /// <summary>
     /// Public accessor for estimatedPlayerHeight, which is how high the player's head was when DetectFloorPlane() was last called. 
     /// </summary>
     public float GetEstimatedPlayerHeight {
 		get { return estimatedPlayerHeight; }
 	}
+
     /// <summary>
     /// Stores current plane used in automatic tracking modes. 
     /// </summary>
     private ZEDPlaneGameObject.PlaneData currentPlane;
+
     /// <summary>
     /// Stores approx coordinates of the plane in camera space from zedCam.GetXYZValue()
     /// Used to compare the realtime camera space coords to those of the detected plane
     /// Works better than comparing cam space coords to planeCenter
     /// </summary>
     private Vector4 currentPlaneCameraSpace;
+
     /// <summary>
     /// Used to track how long the camera is focusing on an area.
     /// Not using units of time, so not incredibly accurate.
     /// Automatic plane tracking only.
     /// </summary>
-    private int camPositionTracker = 0;
+    private int planePositionDelay = 0;
+
+    /// <summary>
+    /// Used to track how long the camera is focusing on an area.
+    /// Max amount of time, once counter hits this, plane has permission to be placed.
+    /// Automatic plane tracking only.
+    /// </summary>
+    public int planePositionDelayMax = 300;
+
     /// <summary>
     /// Determines if the detected plane should be stored and its camera space position tracked until its rendered or overwritten.
     /// Automatic plane tracking only.
     /// </summary>
     private bool trackThisPlane = false;
+
+    /// <summary>
+    /// Pauses plane detection of all kinds when true
+    /// </summary>
+    public bool pauseDetection = false;
+
+    /// <summary>
+    /// Max amount of distance the camera can move in camera space from the saved point currentPlaneCameraSpace
+    /// when a candidate plane was detected
+    /// </summary>
+    public float planeCamVariance = .4f;
 
     /// <summary>
     /// Assign references, create the holder gameobject, and other misc. initialization. 
@@ -362,7 +397,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 		return false;
 	}
 
-
+    private Vector3 camPosition;
+    private Quaternion camRotation;
     private bool setNewPlane(Vector2 screenPos)
     {
         currentPlane = new ZEDPlaneGameObject.PlaneData();
@@ -371,6 +407,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             // Storing this as the reference point of the plane in camera space. 
             // Using the PlaneCenter to compare current camera space position to the plane's doesnt work well
             zedCam.GetXYZValue(screenPos, out currentPlaneCameraSpace);
+            camRotation = LeftCamera.transform.rotation;
+            camPosition = LeftCamera.transform.position;
             return true;
         }
         return false;
@@ -390,7 +428,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     {
         if (!trackThisPlane)  // If plane has not been assigned, try to detect and assign it
         {
-            camPositionTracker = 0;
+            planePositionDelay = 0;
             if (setNewPlane(screenPos)) // If it found a new plane, we want to track it
                 trackThisPlane = true;
             return false;
@@ -400,15 +438,15 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         // Get camera space coords at center of screen space
         zedCam.GetXYZValue(screenPos, out cameraSpaceCoordinates);
         // If camera position and rotation have not moved much since first detecting a plane in camera space
-        if (Vector3.Distance(cameraSpaceCoordinates, currentPlaneCameraSpace) <= .4) {
-            camPositionTracker += 1;
+        if (Vector3.Distance(cameraSpaceCoordinates, currentPlaneCameraSpace) <= planeCamVariance) {
+            planePositionDelay += 1;
         }
         else
         { // If camera position coordinates in screen space has changed too much, stop tracking this plane
             trackThisPlane = false;
             return false;
         }
-        if (camPositionTracker < 300)
+        if (planePositionDelay < planePositionDelayMax)
         { // If camera hasn't been aiming at same area long enough, don't want to place plane yet
             return false;
         } 
@@ -445,8 +483,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 			TransformCameraToLocalMesh (LeftCamera.transform, planeMeshVertices, planeMeshTriangles, worldPlaneVertices, worldPlaneTriangles, numVertices, numTriangles, currentPlane.PlaneCenter);
 
             //Move the GameObject to the center of the plane. Note that the plane data's center is relative to the camera. 
-            newhitGO.transform.position = LeftCamera.transform.position; //Add the camera's world position 
-            newhitGO.transform.position += LeftCamera.transform.rotation * currentPlane.PlaneCenter; //Add the center of the plane
+            newhitGO.transform.position = camPosition; //Add the camera's world position 
+            newhitGO.transform.position += camRotation * currentPlane.PlaneCenter; //Add the center of the plane
             Debug.Log("PLACED PLANE @ " + newhitGO.transform.position);
 			ZEDPlaneGameObject hitPlane = newhitGO.AddComponent<ZEDPlaneGameObject>();
 
@@ -469,21 +507,21 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     void Update()
 	{
         // 0 = "Click Screen to Detect"
-        if(planeDetectionMode == 0 && Input.GetMouseButtonDown(0)) {
+        if(planeDetectionMode == 0 && Input.GetMouseButtonDown(0) && !pauseDetection) {
 			Vector2 ScreenPosition = Input.mousePosition;
             DetectPlaneAtHit(ScreenPosition);
         }
         // 1 = "Automatic Simple"
-        else if (planeDetectionMode == 1)
+        else if (planeDetectionMode == 1 && !pauseDetection)
         {
             if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
                 PlaceHitPlane();
         }
         // 2 = "Automatic Collision Detection"
-        else if (planeDetectionMode == 2)
+        else if (planeDetectionMode == 2 && !pauseDetection)
         {
             if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
-                if(!isPlaneBlocked(LeftCamera.transform.position + (LeftCamera.transform.rotation * currentPlane.PlaneCenter)))
+                if(!isPlaneBlocked(camPosition + (camRotation * currentPlane.PlaneCenter)))
                     PlaceHitPlane();
         }
     }
@@ -497,7 +535,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 		isDisplay = isVisibleInGameOption;
 	}
 
-	#if UNITY_EDITOR
+#if UNITY_EDITOR
     /// <summary>
     /// Called when the Inspector is visible or changes. Updates plane physics and visibility settings. 
     /// </summary>
@@ -510,13 +548,15 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 
 		if (hitPlaneList != null)
 			foreach (ZEDPlaneGameObject c in hitPlaneList) {
+                if (c == null)
+                    continue;
 				if (c.IsCreated)
 					c.SetPhysics (addPhysicsOption);
 
 				c.SetVisible (isVisibleInSceneOption);
 			}	
 	}
-	#endif
+#endif
 
 }
 
@@ -558,10 +598,12 @@ public class ZEDPlaneDetectionEditor : Editor
     /// Serializable version of ZEDPlaneDetectionManager's planeDetectionMode property. 
     /// </summary>
     private SerializedProperty planeDetectionMode;
+    private SerializedProperty pauseDetection;
 
     private int popupIndex;
     private string[] popupOptions = new string[]{"Click Screen to Detect", "Automatic Simple", "Automatic Collision Detection"};
-
+    private int pausePlayIndex;
+    private string[] pausePlayButton = new string[]{"Pause Detection", "Resume Detection"};
     private ZEDPlaneDetectionManager Target
     {
         get { return (ZEDPlaneDetectionManager)target; }
@@ -576,7 +618,9 @@ public class ZEDPlaneDetectionEditor : Editor
 		isVisibleInGameOption = serializedObject.FindProperty("isVisibleInGameOption");
         overrideMaterialOption = serializedObject.FindProperty("overrideMaterial");
         planeDetectionMode = serializedObject.FindProperty("planeDetectionMode");
+        pauseDetection = serializedObject.FindProperty("pauseDetection");
         popupIndex = planeDetectionMode.intValue;
+        pausePlayIndex = pauseDetection.boolValue ? 1:0; // 1 if true, 0 if paused
     }
 
  
@@ -607,6 +651,8 @@ public class ZEDPlaneDetectionEditor : Editor
 		EditorGUILayout.EndHorizontal();
 		GUILayout.Space(5);
 
+        
+
 		GUI.enabled = true;
 		EditorGUILayout.BeginHorizontal();
         GUIContent planedetectionlabel = new GUIContent("Plane Detection Mode", "Change how planes are detected, whether automatic or on screen click.");
@@ -623,7 +669,27 @@ public class ZEDPlaneDetectionEditor : Editor
 		GUILayout.Space(20);
 		EditorGUILayout.EndHorizontal();
 
+        GUI.enabled = cameraIsReady;
+        GUIContent deletePlanesButtonLabel = new GUIContent("Clear Planes", "Delete all detected planes.");
+        if (GUILayout.Button(deletePlanesButtonLabel))
+		{
+			if (planeDetector.IsReady)
+				planeDetector.destroyAllPlanes();
+		}
 
+        GUIContent pauseButton = new GUIContent(pausePlayButton[pausePlayIndex], "Pause/Resume plane detection.");
+        if (GUILayout.Button(pauseButton))
+		{
+			if (planeDetector.IsReady){
+				planeDetector.pauseDetection=!planeDetector.pauseDetection;
+                if(!planeDetector.pauseDetection)
+                    pausePlayIndex = 0;
+                else
+                    pausePlayIndex = 1;
+            }
+            
+		}
+        GUI.enabled = true;
 		GUILayout.Space(20);
 		EditorGUILayout.BeginHorizontal();
 		GUILayout.Label("Visualization", EditorStyles.boldLabel);
