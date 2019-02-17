@@ -431,18 +431,33 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         }
         return false;
     }
+
     /// <summary>
-    /// Fire a raycast from the current position of the camera in worldspace to the given worldPosition parameter.
-    /// If the ray hits something, isBlocked = true. In order to hit something, collision must be enabled on the object.
-    /// Using the IsLocationVisible helper method was often innacurate due to incorrect depth values, so doing simple raycasting instead.
+    /// Fire a raycast from the current position of the camera in worldspace to the given objectWorldPosition parameter.
+    /// If the ray hits something, a RaycastHit object struct is returned. In order to hit something, collision must be enabled on the object.
+    /// If it doesnt hit something, hit.collider will be null.
     /// </summary>
-    /// <returns><c>true</c>, if ray hits something, <c>false</c> otherwise.</returns>
-    private bool isPlaneBlocked(Vector3 worldPosition)
+    /// <returns><c>RaycastHit struct</c></returns>
+    public RaycastHit raycastCollider(Vector3 objectWorldPosition)
     {
         RaycastHit hit;
-        bool isBlocked = Physics.Raycast(LeftCamera.transform.position, worldPosition - LeftCamera.transform.position, out hit);
-        Debug.Log("COORD @ " + worldPosition + " Blocked: " + isBlocked);
-        return isBlocked;
+        Physics.Raycast(LeftCamera.transform.position, objectWorldPosition - LeftCamera.transform.position, out hit);
+        return hit;
+    }
+
+    /// <summary>
+    /// Calls raycastCollider(Vector3 objectWorldPosition) when you only have the screen space position to go off of.
+    /// Takes screen space coordinate instead. This is if you dont have a specific position of a collision object in mind.
+    /// If the ray hits something, a RaycastHit object struct is returned. In order to hit something, collision must be enabled on the object.
+    /// If it doesnt hit something, hit.collider will be null.
+    /// </summary>
+    /// <returns><c>RaycastHit struct</c></returns>
+    public RaycastHit raycastCollider(Vector2 screenPos)
+    {
+        Vector4 cameraSpace;
+        zedCam.GetXYZValue(screenPos, out cameraSpace);
+        Vector3 cameraSpaceV3 = cameraSpace; // Convert vector4 to vector3
+        return raycastCollider(LeftCamera.transform.position + (LeftCamera.transform.rotation * cameraSpaceV3));
     }
 
     /// <summary>
@@ -549,7 +564,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         else if (planeDetectionMode == 2 && !pauseDetection)
         {
             if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
-                if(!isPlaneBlocked(camPosition + (camRotation * currentPlane.PlaneCenter)))
+                if(raycastCollider(camPosition + (camRotation * currentPlane.PlaneCenter)).collider == null)
                     PlaceHitPlane();
         }
     }
@@ -687,9 +702,10 @@ public class ZEDPlaneDetectionEditor : Editor
 		GUI.enabled = cameraIsReady;
 		EditorGUILayout.BeginHorizontal();
         GUIContent floordetectionlabel = new GUIContent("Single-shot Floor Detection", "Attempt to detect a floor plane in the current view.");
-		GUILayout.Label(floordetectionlabel);	GUILayout.Space(20);
-
+		GUILayout.Label(floordetectionlabel);	
         GUIContent floordetectbuttonlabel = new GUIContent("Detect", "Attempt to detect a floor plane in the current view.");
+		GUILayout.FlexibleSpace();
+
 		if (GUILayout.Button(floordetectbuttonlabel))
 		{
 			if (planeDetector.IsReady)
@@ -699,12 +715,11 @@ public class ZEDPlaneDetectionEditor : Editor
 		EditorGUILayout.EndHorizontal();
 		GUILayout.Space(5);
 
-        
-
 		GUI.enabled = true;
 		EditorGUILayout.BeginHorizontal();
         GUIContent planedetectionlabel = new GUIContent("Plane Detection Mode", "Change how planes are detected, whether automatic or on screen click.");
         GUILayout.Label(planedetectionlabel);
+		GUILayout.FlexibleSpace();
         popupIndex = EditorGUILayout.Popup(popupIndex, popupOptions);
         planeDetectionMode.intValue = popupIndex;
         if(planeDetectionMode.intValue == 2){
@@ -714,7 +729,6 @@ public class ZEDPlaneDetectionEditor : Editor
         else{
             colliderButtonEnabled = true;
         }
-		GUILayout.Space(20);
 		EditorGUILayout.EndHorizontal();
 
 		EditorGUILayout.BeginHorizontal();
