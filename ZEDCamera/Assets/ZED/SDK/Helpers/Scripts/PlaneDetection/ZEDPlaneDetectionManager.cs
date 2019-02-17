@@ -433,31 +433,18 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Fire a raycast from the current position of the camera in worldspace to the given objectWorldPosition parameter.
-    /// If the ray hits something, a RaycastHit object struct is returned. In order to hit something, collision must be enabled on the object.
-    /// If it doesnt hit something, hit.collider will be null.
-    /// </summary>
-    /// <returns><c>RaycastHit struct</c></returns>
-    public RaycastHit raycastCollider(Vector3 objectWorldPosition)
-    {
-        RaycastHit hit;
-        Physics.Raycast(LeftCamera.transform.position, objectWorldPosition - LeftCamera.transform.position, out hit);
-        return hit;
-    }
-
-    /// <summary>
-    /// Calls raycastCollider(Vector3 objectWorldPosition) when you only have the screen space position to go off of.
-    /// Takes screen space coordinate instead. This is if you dont have a specific position of a collision object in mind.
+    /// Takes screen space coordinate and fires a ray.
     /// If the ray hits something, a RaycastHit object struct is returned. In order to hit something, collision must be enabled on the object.
     /// If it doesnt hit something, hit.collider will be null.
     /// </summary>
     /// <returns><c>RaycastHit struct</c></returns>
     public RaycastHit raycastCollider(Vector2 screenPos)
     {
-        Vector4 cameraSpace;
-        zedCam.GetXYZValue(screenPos, out cameraSpace);
-        Vector3 cameraSpaceV3 = cameraSpace; // Convert vector4 to vector3
-        return raycastCollider(LeftCamera.transform.position + (LeftCamera.transform.rotation * cameraSpaceV3));
+        RaycastHit hit;
+        Vector3 worldPos;
+        ZEDSupportFunctions.GetWorldPositionAtPixel(screenPos, LeftCamera, out worldPos); // Get world space coord from screen space coord
+        Physics.Raycast(LeftCamera.transform.position, worldPos - LeftCamera.transform.position, out hit);
+        return hit;
     }
 
     /// <summary>
@@ -564,7 +551,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         else if (planeDetectionMode == 2 && !pauseDetection)
         {
             if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
-                if(raycastCollider(camPosition + (camRotation * currentPlane.PlaneCenter)).collider == null)
+                if(raycastCollider(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null)
                     PlaceHitPlane();
         }
     }
