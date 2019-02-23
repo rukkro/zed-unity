@@ -110,6 +110,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         {
             GameObject.Destroy(child.gameObject);
         }
+        planeHitCount = 0;
     }
 
     /// <summary>
@@ -151,9 +152,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 
     /// <summary>
     /// Determines whether planes are detected on screen click, or automatically based on the point in the center of the screen.
-    /// Modes: 0 = "Click Screen to Detect", 1 = "Automatic Simple", 2 = "Automatic Collision Detection"
+    /// Modes: 0 = "Click Screen to Detect", 1 = "Automatic"
     /// 0 - click on screen to try to detect plane. 1 - Automatically try to detect planes based on point in center of screen space
-    /// 2 - Auto detect planes based on center point of screen space AND try to avoid collision with other objects/planes w/ collision
     /// </summary>
     public int planeDetectionMode = 0;
 
@@ -231,6 +231,17 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// when a candidate plane was detected
     /// </summary>
     public float planeCamVariance = .4f;
+
+    /// <summary>
+    /// Prevents planes found with type HIT_UNKNOWN from being placed.
+    /// </summary>
+    public bool blockUnknownPlanes = false;
+
+    /// <summary>
+    /// Whether or not collision detection is used to place planes. Before placing a plane, a raycast is fired to the spot where the plane would be placed.
+    /// If the raycast hits a collider, the plane will not be placed. Requires collision on the foreign object to be enabled.
+    /// </summary>
+    public bool useCollisionDetection = false;
 
     /// <summary>
     /// Assign references, create the holder gameobject, and other misc. initialization. 
@@ -485,13 +496,14 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
 
     /// <summary>
     /// Detects the plane around screen-space coordinates specified. This is for the click-to-detect plane mode, not automatic.
+    /// Keeping this method because examples rely on it.
     /// </summary>
     /// <returns><c>true</c>, if plane was placed, <c>false</c> otherwise.</returns>
     public bool DetectPlaneAtHit(Vector2 screenPos)
     {
         bool result = false;
-        if (setNewPlane(screenPos))
-            result = PlaceHitPlane();
+        setNewPlane(screenPos);
+        result = PlaceHitPlane();
         return result;
     }
 
@@ -539,20 +551,29 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         // 0 = "Click Screen to Detect"
         if(planeDetectionMode == 0 && Input.GetMouseButtonDown(0) && !pauseDetection) {
 			Vector2 ScreenPosition = Input.mousePosition;
-            DetectPlaneAtHit(ScreenPosition);
+            if (setNewPlane(ScreenPosition)) {
+                if (useCollisionDetection)
+                    if (!(raycastCollider(ScreenPosition).collider == null))
+                        return;
+                if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
+                    PlaceHitPlane();
+                else if (!blockUnknownPlanes)
+                    PlaceHitPlane();
+            }
         }
-        // 1 = "Automatic Simple"
+        // 1 = "Automatic"
         else if (planeDetectionMode == 1 && !pauseDetection)
         {
             if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
-                PlaceHitPlane();
-        }
-        // 2 = "Automatic Collision Detection"
-        else if (planeDetectionMode == 2 && !pauseDetection)
-        {
-            if (DetectPlaneAtHitAuto(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
-                if(raycastCollider(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null)
+            {
+                if (useCollisionDetection)
+                    if (!(raycastCollider(new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null))
+                        return;
+                if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
                     PlaceHitPlane();
+                else if (!blockUnknownPlanes)
+                    PlaceHitPlane();
+            }
         }
     }
 
@@ -637,13 +658,23 @@ public class ZEDPlaneDetectionEditor : Editor
     private SerializedProperty planePositionDelayMax;
 
     /// <summary>
+    /// Serializable version of ZEDPlaneDetectionManager's useCollisionDetection property. 
+    /// </summary>
+    private SerializedProperty useCollisionDetectionOption;
+
+    /// <summary>
+    /// Serializable version of ZEDPlaneDetectionManager's blockUnknownPlanes property. 
+    /// </summary>
+    private SerializedProperty blockUnknownPlanesOption;
+
+    /// <summary>
     /// Index of option chosen in popup/dropdown menu. First option = 0.
     /// </summary>
     private int popupIndex;
     /// <summary>
     /// Strings for different popup options.
     /// </summary>
-    private string[] popupOptions = new string[]{"Click Screen to Detect", "Automatic Simple", "Automatic Collision Detection"};
+    private string[] popupOptions = new string[]{"Click Screen to Detect", "Automatic"};
     /// <summary>
     /// Index of string for pause/resume button. 0 = "Pause Detection", 1 = "Resume Detection"
     /// </summary>
@@ -665,10 +696,12 @@ public class ZEDPlaneDetectionEditor : Editor
 		addPhysicsOption = serializedObject.FindProperty("addPhysicsOption");
 		isVisibleInSceneOption = serializedObject.FindProperty("isVisibleInSceneOption");
 		isVisibleInGameOption = serializedObject.FindProperty("isVisibleInGameOption");
+        useCollisionDetectionOption = serializedObject.FindProperty("useCollisionDetection");
         overrideMaterialOption = serializedObject.FindProperty("overrideMaterial");
         planeDetectionMode = serializedObject.FindProperty("planeDetectionMode");
         pauseDetection = serializedObject.FindProperty("pauseDetection");
         planePositionDelayMax = serializedObject.FindProperty("planePositionDelayMax");
+        blockUnknownPlanesOption = serializedObject.FindProperty("blockUnknownPlanes");
         popupIndex = planeDetectionMode.intValue;
         pausePlayIndex = pauseDetection.boolValue ? 1:0; // 1 if true, 0 if paused
     }
@@ -700,22 +733,26 @@ public class ZEDPlaneDetectionEditor : Editor
 		}
 		GUILayout.FlexibleSpace();
 		EditorGUILayout.EndHorizontal();
-		GUILayout.Space(5);
 
+		GUILayout.Space(5);
 		GUI.enabled = true;
+
 		EditorGUILayout.BeginHorizontal();
         GUIContent planedetectionlabel = new GUIContent("Plane Detection Mode", "Change how planes are detected, whether automatic or on screen click.");
         GUILayout.Label(planedetectionlabel);
 		GUILayout.FlexibleSpace();
         popupIndex = EditorGUILayout.Popup(popupIndex, popupOptions);
         planeDetectionMode.intValue = popupIndex;
-        if(planeDetectionMode.intValue == 2){
-            colliderButtonEnabled = false;
-            addPhysicsOption.boolValue = true;
-        }
-        else{
-            colliderButtonEnabled = true;
-        }
+		EditorGUILayout.EndHorizontal();
+
+		EditorGUILayout.BeginHorizontal();
+        GUIContent useCollisionDetectionLabel = new GUIContent("Plane Collision Avoidance", "Whether an area is checked for other collision objects before placing a plane.");
+        useCollisionDetectionOption.boolValue = EditorGUILayout.Toggle(useCollisionDetectionLabel, useCollisionDetectionOption.boolValue);
+		EditorGUILayout.EndHorizontal();
+		
+        EditorGUILayout.BeginHorizontal();
+        GUIContent blockUnknownPlanesLabel = new GUIContent("Block Unknown Planes", "Do not place planes that are not classified as horizontal or vertical.");
+        blockUnknownPlanesOption.boolValue = EditorGUILayout.Toggle(blockUnknownPlanesLabel, blockUnknownPlanesOption.boolValue);
 		EditorGUILayout.EndHorizontal();
 
 		EditorGUILayout.BeginHorizontal();
