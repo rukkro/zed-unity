@@ -88,8 +88,9 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     {
         foreach (Transform child in holder.transform)
         {
-            GameObject.Destroy(child.gameObject);
+            Destroy(child.gameObject);
         }
+        hitPlaneList = new List<ZEDPlaneGameObject>();
         planeHitCount = 0;
     }
     /// <summary>
