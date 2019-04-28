@@ -640,17 +640,44 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         else if (planeDetectionMode == 1 && !pauseDetection)
         {
             List<ZEDManager> managers = ZEDManager.GetInstances();
-            // Dont have any way to test >1 managers, so only using 1 here
-            ZEDManager manager = managers[0];
-            if (DetectPlaneAtHitAuto(manager,new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+            if (managers.Count == 1)
             {
-                if (useCollisionDetection)
-                    if (!(raycastCollider(manager,new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null))
-                        return;
-                if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
-                    PlaceHitPlane(manager);
-                else if (!blockUnknownPlanes)
-                    PlaceHitPlane(manager);
+                ZEDManager manager = managers[0];
+                if (DetectPlaneAtHitAuto(manager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+                {
+                    if (useCollisionDetection)
+                        if (!(raycastCollider(manager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null))
+                            return;
+                    if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
+                        PlaceHitPlane(manager);
+                    else if (!blockUnknownPlanes)
+                        PlaceHitPlane(manager);
+                }
+            }
+            else if (managers.Count > 1)
+            {
+                //There are at least two ZEDManagers rendering. Find the one that's likely the last to render, so it's the one the user clicked on. 
+                float highestdepth = Mathf.NegativeInfinity;
+                ZEDManager highestmanager = managers[0];
+                foreach (ZEDManager manager in managers)
+                {
+                    float depth = manager.GetLeftCamera().depth;
+                    if (depth >= highestdepth)
+                    {
+                        highestdepth = depth;
+                        highestmanager = manager;
+                    }
+                }
+                if (DetectPlaneAtHitAuto(highestmanager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+                {
+                    if (useCollisionDetection)
+                        if (!(raycastCollider(highestmanager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null))
+                            return;
+                    if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
+                        PlaceHitPlane(highestmanager);
+                    else if (!blockUnknownPlanes)
+                        PlaceHitPlane(highestmanager);
+                }
             }
         }
 
