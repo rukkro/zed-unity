@@ -31,6 +31,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// This won't happen unless DetectFloorPlane() is called. 
     /// </summary>
 	private bool hasDetectedFloor = false;
+
     /// <summary>
     /// Public accessor for hasDetectedFloor, which is whether a floor plane has been detected during runtime. 
     /// </summary>
@@ -81,6 +82,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         else
             return null;
     }
+
     /// <summary>
     /// Destroys all plane game objects
     /// </summary>
@@ -93,10 +95,12 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         hitPlaneList = new List<ZEDPlaneGameObject>();
         planeHitCount = 0;
     }
+
     /// <summary>
     /// Buffer for holding a new plane's vertex data from the SDK.
     /// </summary>
 	private Vector3[] planeMeshVertices;
+
     /// <summary>
     /// Buffer for holding a new plane's triangle data from the SDK.
     /// </summary>
@@ -139,6 +143,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// </summary>
     [SerializeField]
     private bool addPhysicsOption = true;
+
     /// <summary>
     /// If true, existing planes will have their colliders updated
     /// based on addPhhysicsOption in the next Update() step.
@@ -165,12 +170,14 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             }
         }
     }
+
     /// <summary>
     /// Whether the planes are drawn.
     /// To update publicly or at runtime, use planesVisibleInScene instead. 
     /// </summary>
     [SerializeField]
     private bool isVisibleInSceneOption = true;
+
     /// <summary>
     /// If true, existing planes will have their visibility updated 
     /// based on isVisibleInSceneOption in the next Update() step.
@@ -269,12 +276,14 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             }
         }
     }
+
     /// <summary>
     /// Whether the planes are drawn in the ZED's final output, viewable in Unity's Game window or a build. 
     /// To update publicly or at runtime, use planesVisibleInGame instead. 
     /// </summary>
     [SerializeField]
     private bool isVisibleInGameOption = true;
+
     /// <summary>
     /// If true, existing planes will have their in-game visibility updated 
     /// based on isVisibleInGameOption in the next Update() step.
@@ -291,6 +300,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// How high the player's head is from the floor. Filled in when DetectFloorPlane() is called. 
     /// </summary>
     private float estimatedPlayerHeight = 0.0f;
+
     /// <summary>
     /// Public accessor for estimatedPlayerHeight, which is how high the player's head was when DetectFloorPlane() was last called. 
     /// </summary>
@@ -316,7 +326,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         planeMeshVertices = new Vector3[65000];
         planeMeshTriangles = new int[65000];
 
-        //floorPlaneGO = holder.AddComponent<ZEDPlaneGameObject> ();
         hitPlaneList = new List<ZEDPlaneGameObject>();
     }
 
@@ -456,6 +465,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         }
         return DetectPlaneAtHit(managers[0], screenPos);
     }
+
     /// <summary>
     /// Detects a plane at the given point in screen space. If it finds a plane, save the camera space position, and the world space coordinates.
     /// </summary>
@@ -521,6 +531,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         result = PlaceHitPlane(manager);
         return result;
     }
+
     /// <summary>
     /// Used in the automatic modes of plane detection. Keeps tracking a plane until the planePositionDelay hits planePositionDelayMax.
     /// Ensures the camera hasn't moved too much from the area where the candidate plane should be at. If the cam moves too much, look for a new plane.
@@ -558,7 +569,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         }
         return false;
         // If camera hasn't been aiming at same area long enough, don't want to place plane yet
-
     }
 
     /// <summary>
@@ -584,9 +594,9 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             int[] worldPlaneTriangles = new int[numTriangles];
             TransformCameraToLocalMesh(leftcamera.transform, planeMeshVertices, planeMeshTriangles, worldPlaneVertices, worldPlaneTriangles, numVertices, numTriangles, currentPlane.PlaneCenter);
 
-            //Move the GameObject to the center of the plane. Note that the plane data's center is relative to the camera. 
-            newhitGO.transform.position = leftcamera.transform.position; //Add the camera's world position 
-            newhitGO.transform.position += leftcamera.transform.rotation * currentPlane.PlaneCenter; //Add the center of the plane
+            // Move the GameObject to the center of the plane. Note that the plane data's center is relative to the camera. 
+            newhitGO.transform.position = camPosition; //Add the camera's world position 
+            newhitGO.transform.position += camRotation * currentPlane.PlaneCenter; //Add the center of the plane
 
             ZEDPlaneGameObject hitPlane = newhitGO.AddComponent<ZEDPlaneGameObject>();
 
@@ -594,7 +604,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             else hitPlane.Create(leftcamera, currentPlane, worldPlaneVertices, worldPlaneTriangles, planeHitCount + 1);
 
             hitPlane.SetPhysics(addPhysicsOption);
-            //hitPlane.SetVisible(isVisibleInSceneOption);
             hitPlaneList.Add(hitPlane);
             planeHitCount++;
             return true;
@@ -606,7 +615,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Check if the screen was clicked. If so, check for a plane where the click happened using DetectPlaneAtHit().
+    /// Check if the screen was clicked if the mode is set to 0. If so, check for a plane where the click happened using DetectPlaneAtHit().
+    /// Check if there are any planes in front of the camera if the mode is set to 1.
     /// </summary>
     void Update()
     {
@@ -643,10 +653,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             if (managers.Count == 1)
             {
                 ZEDManager manager = managers[0];
-                if (DetectPlaneAtHitAuto(manager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+                if (DetectPlaneAtHitAuto(manager, new Vector2((Screen.width / 2), (Screen.height / 2))))
                 {
                     if (useCollisionDetection)
-                        if (!(raycastCollider(manager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null))
+                        if (!(raycastCollider(manager, new Vector2((Screen.width / 2), (Screen.height / 2))).collider == null))
                             return;
                     if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
                         PlaceHitPlane(manager);
@@ -668,10 +678,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
                         highestmanager = manager;
                     }
                 }
-                if (DetectPlaneAtHitAuto(highestmanager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))))
+                if (DetectPlaneAtHitAuto(highestmanager, new Vector2((Screen.width / 2), (Screen.height / 2))))
                 {
                     if (useCollisionDetection)
-                        if (!(raycastCollider(highestmanager, new Vector2((float)(Screen.width / 2), (float)(Screen.height / 2))).collider == null))
+                        if (!(raycastCollider(highestmanager, new Vector2((Screen.width / 2), (Screen.height / 2))).collider == null))
                             return;
                     if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
                         PlaceHitPlane(highestmanager);
@@ -702,17 +712,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         //Update visibility if needed. 
         if (willUpdateSceneVisibility)
         {
-            /*if (floorPlane != null && floorPlane.IsCreated)
-            {
-                floorPlane.SetVisible(isVisibleInSceneOption);
-            }
-            if (hitPlaneList != null)
-            {
-                foreach (ZEDPlaneGameObject c in hitPlaneList)
-                {
-                    c.SetVisible(isVisibleInSceneOption);
-                }
-            }*/
             SwitchSceneDisplay();
             willUpdateSceneVisibility = false;
         }
@@ -751,8 +750,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         if (floorPlane != null && floorPlane.IsCreated)
         {
             floorPlane.SetPhysics(addPhysicsOption);
-
-            //floorPlane.SetVisible(isVisibleInSceneOption);
         }
 
         if (hitPlaneList != null)
@@ -762,17 +759,12 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
                     continue;
                 if (c.IsCreated)
                     c.SetPhysics(addPhysicsOption);
-
-                //c.SetVisible(isVisibleInSceneOption);
             }
 
         SwitchSceneDisplay();
         SwitchGameDisplay();
     }
-
-
 #endif
-
 }
 
 
@@ -789,9 +781,6 @@ public class ZEDPlaneDetectionEditor : Editor
     /// The ZEDPlaneDetectionManager component that this editor is displaying. 
     /// </summary>
     private ZEDPlaneDetectionManager planeDetector;
-
-    // private GUILayoutOption[] optionsButtonBrowse = { GUILayout.MaxWidth(30) };
-
     /// <summary>
     /// Serializable version of ZEDPlaneDetectionManager's addPhysicsOption property. 
     /// </summary>
@@ -820,17 +809,14 @@ public class ZEDPlaneDetectionEditor : Editor
     /// Serializable version of ZEDPlaneDetectionManager's planePositionDelayMax property. 
     /// </summary>
     private SerializedProperty planePositionDelayMax;
-
     /// <summary>
     /// Serializable version of ZEDPlaneDetectionManager's useCollisionDetection property. 
     /// </summary>
     private SerializedProperty useCollisionDetectionOption;
-
     /// <summary>
     /// Serializable version of ZEDPlaneDetectionManager's blockUnknownPlanes property. 
     /// </summary>
     private SerializedProperty blockUnknownPlanesOption;
-
     /// <summary>
     /// Index of option chosen in popup/dropdown menu. First option = 0.
     /// </summary>
@@ -989,7 +975,6 @@ public class ZEDPlaneDetectionEditor : Editor
 
         serializedObject.ApplyModifiedProperties(); //Applies all changes to serializedproperties to the actual properties they're connected to. 
 
-        //if (!cameraIsReady) Repaint();
         Repaint();
 
     }
