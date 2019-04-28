@@ -197,9 +197,8 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     private ZEDPlaneGameObject.PlaneData currentPlane;
 
     /// <summary>
-    /// Stores approx coordinates of the plane in camera space from zedCam.GetXYZValue()
-    /// Used to compare the realtime camera space coords to those of the detected plane
-    /// Works better than comparing cam space coords to planeCenter
+    /// Stores approx position of the plane in camera space from zedCam.GetXYZValue()
+    /// Used to compare the current camera space position to that of the detected plane
     /// </summary>
     private Vector4 currentPlaneCameraSpace;
 
@@ -427,7 +426,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
                     floorPlane = floorPlaneGO.AddComponent<ZEDPlaneGameObject>();
                 }
 
-
                 if (!floorPlane.IsCreated) //Call ZEDPlaneGameObject.Create() on the floor ZEDPlaneGameObject if it hasn't yet been run. 
                 {
                     if (overrideMaterial != null) floorPlane.Create(leftcamera, plane, worldPlaneVertices, worldPlaneTriangles, 0, overrideMaterial);
@@ -443,16 +441,15 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
                 return true;
             }
         }
-
         return false;
     }
 
     /// <summary>
-    /// Detects the plane around screen-space coordinates specified. 
+    /// Detects the plane at screen-space position specified. 
     /// <para>Uses the first available ZEDManager in the scene.</para>
     /// </summary>
     /// <returns><c>true</c>, if plane at hit was detected, <c>false</c> otherwise.</returns>
-    /// <param name="screenPos">Position of the pixel in screen space (2D).</param>
+    /// <param name="screenPos">Position of the pixel in screen space.</param>
     public bool DetectPlaneAtHit(Vector2 screenPos)
     {
         //Find the first available ZEDManager. 
@@ -477,8 +474,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         currentPlane = new ZEDPlaneGameObject.PlaneData();
         if (zedcam.findPlaneAtHit(ref currentPlane, screenPos) == sl.ERROR_CODE.SUCCESS)
         {
-            // Storing this as the reference point of the plane in camera space. 
-            // Using the PlaneCenter to compare current camera space position to the plane's doesnt work well
+            // Storing this as the reference position of the plane relative to the camera.
             zedcam.GetXYZValue(screenPos, out currentPlaneCameraSpace);
             camRotation = leftcamera.transform.rotation;
             camPosition = leftcamera.transform.position;
@@ -488,34 +484,17 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Takes screen space coordinate and fires a ray.
-    /// If not provided with a manager, then the first one will be used.
-    /// If the ray hits something, a RaycastHit object struct is returned. In order to hit something, collision must be enabled on the object.
-    /// If it doesnt hit something, hit.collider will be null.
+    /// Raycast from the camera in the direction it's facing.
+    /// If the raycast hits something, a RaycastHit is returned. 
+    /// In order to hit something, collision must be enabled on the object.
     /// </summary>
-    /// <returns><c>RaycastHit struct</c></returns>
-    public RaycastHit raycastCollider(Vector2 screenPos)
+    /// <returns><c>RaycastHit</c></returns>
+    private RaycastHit raycastCollider(ZEDManager manager)
     {
-        List<ZEDManager> managers = ZEDManager.GetInstances();
-        return raycastCollider(managers[0], screenPos);
-    }
-
-    /// <summary>
-    /// Takes screen space coordinate and fires a ray.
-    /// If the ray hits something, a RaycastHit object struct is returned. In order to hit something, collision must be enabled on the object.
-    /// If it doesnt hit something, hit.collider will be null.
-    /// </summary>
-    /// <returns><c>RaycastHit struct</c></returns>
-    public RaycastHit raycastCollider(ZEDManager manager, Vector2 screenPos)
-    {
-        sl.ZEDCamera zedcam = manager.zedCamera;
         Camera leftcamera = manager.GetLeftCamera();
         RaycastHit hit;
-        Vector3 worldPos;
-        ZEDSupportFunctions.GetWorldPositionAtPixel(zedcam,screenPos, leftcamera, out worldPos); // Get world space coord from screen space coord
-        //Debug.DrawRay(LeftCamera.transform.position, worldPos - LeftCamera.transform.position, Color.green, 30f);
-        // Raycast from the camera in the direction of the world point
-        Physics.Raycast(leftcamera.transform.position, (worldPos - leftcamera.transform.position) * 20, out hit);
+        int raycastLength = 20;
+        Physics.Raycast(leftcamera.transform.position, leftcamera.transform.forward * raycastLength, out hit);
         return hit;
     }
 
@@ -523,7 +502,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// Detects the plane around screen-space coordinates specified. 
     /// </summary>
     /// <returns><c>true</c>, if plane at hit was detected, <c>false</c> otherwise.</returns>
-    /// <param name="screenPos">Position of the pixel in screen space (2D).</param>
+    /// <param name="screenPos">Position of the pixel in screen space.</param>
     public bool DetectPlaneAtHit(ZEDManager manager, Vector2 screenPos)
     {
         bool result = false;
@@ -535,11 +514,13 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
     /// <summary>
     /// Used in the automatic modes of plane detection. Keeps tracking a plane until the planePositionDelay hits planePositionDelayMax.
     /// Ensures the camera hasn't moved too much from the area where the candidate plane should be at. If the cam moves too much, look for a new plane.
+    /// Automatic plane detection uses the center of the screen as the detection point.
     /// </summary>
     /// <returns><c>true</c>, if cam hasnt moved too much and its safe to place plane, <c>false</c> otherwise.</returns>
-    private bool DetectPlaneAtHitAuto(ZEDManager manager, Vector2 screenPos)
+    private bool DetectPlaneAtHitAuto(ZEDManager manager)
     {
         sl.ZEDCamera zedcam = manager.zedCamera;
+        Vector2 screenPos = new Vector2((Screen.width / 2), (Screen.height / 2));
 
         if (!trackThisPlane)  // If plane has not been assigned, try to detect and assign it
         {
@@ -550,20 +531,20 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
         }
 
         Vector4 cameraSpaceCoordinates;
-        // Get camera space coords at center of screen space
+        // Get camera space coords at screen space coordinate
         zedcam.GetXYZValue(screenPos, out cameraSpaceCoordinates);
-        // If camera position and rotation have not moved much since first detecting a plane in camera space
+        // If camera position hasn ot moved much since first detecting a plane in camera space
         if (Vector3.Distance(cameraSpaceCoordinates, currentPlaneCameraSpace) <= planeCamVariance)
         {
             planePositionDelay += Time.deltaTime;
         }
         else
-        { // If camera position coordinates in screen space has changed too much, stop tracking this plane
+        { // If camera position in screen space has changed too much, stop tracking this plane
             trackThisPlane = false;
             return false;
         }
         if (planePositionDelay > planePositionDelayMax)
-        {// Cam has been aiming long enough at candidate plane area, return true indicating we can place it (or do other placement checks)
+        { // Cam has been aiming long enough at candidate plane area
             trackThisPlane = false;
             return true;
         }
@@ -608,10 +589,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             planeHitCount++;
             return true;
         }
-        
-
         return false;
-
     }
 
     /// <summary>
@@ -643,7 +621,6 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
                         highestmanager = manager;
                     }
                 }
-
                 DetectPlaneAtHit(highestmanager, ScreenPosition);
             }
         }
@@ -653,10 +630,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             if (managers.Count == 1)
             {
                 ZEDManager manager = managers[0];
-                if (DetectPlaneAtHitAuto(manager, new Vector2((Screen.width / 2), (Screen.height / 2))))
+                if (DetectPlaneAtHitAuto(manager))
                 {
                     if (useCollisionDetection)
-                        if (!(raycastCollider(manager, new Vector2((Screen.width / 2), (Screen.height / 2))).collider == null))
+                        if (!(raycastCollider(manager).collider == null))
                             return;
                     if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
                         PlaceHitPlane(manager);
@@ -666,7 +643,7 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
             }
             else if (managers.Count > 1)
             {
-                //There are at least two ZEDManagers rendering. Find the one that's likely the last to render, so it's the one the user clicked on. 
+                //There are at least two ZEDManagers rendering. Find the one that's likely the last to render.
                 float highestdepth = Mathf.NegativeInfinity;
                 ZEDManager highestmanager = managers[0];
                 foreach (ZEDManager manager in managers)
@@ -678,10 +655,10 @@ public class ZEDPlaneDetectionManager : MonoBehaviour
                         highestmanager = manager;
                     }
                 }
-                if (DetectPlaneAtHitAuto(highestmanager, new Vector2((Screen.width / 2), (Screen.height / 2))))
+                if (DetectPlaneAtHitAuto(highestmanager))
                 {
                     if (useCollisionDetection)
-                        if (!(raycastCollider(highestmanager, new Vector2((Screen.width / 2), (Screen.height / 2))).collider == null))
+                        if (!(raycastCollider(highestmanager).collider == null))
                             return;
                     if (blockUnknownPlanes && !(currentPlane.Type == ZEDPlaneGameObject.PLANE_TYPE.HIT_UNKNOWN))
                         PlaceHitPlane(highestmanager);
